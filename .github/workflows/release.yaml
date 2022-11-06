@@ -25,9 +25,6 @@ jobs:
       - name: build x64
         run: go run _scripts/make.go build --GOARCH amd64 --GOOS darwin && mv dlv delve_darwin_amd64
       - name: build arm64
-        env:
-          GOOS: darwin
-          GOARCH: arm64
         run: go run _scripts/make.go build --GOARCH arm64 --GOOS darwin && mv dlv delve_darwin_arm64
       - name: Sign delve binaries
         env:
