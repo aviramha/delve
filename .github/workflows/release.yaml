@@ -23,15 +23,12 @@ jobs:
           go-version: '>=1.19.3'
           cache: true
       - name: build x64
-        env:
-          GOOS: darwin
-          GOARCH: amd64
-        run: make build && mv dlv delve_darwin_amd64
+        run: go run _scripts/make.go build --GOARCH amd64 --GOOS darwin && mv dlv delve_darwin_amd64
       - name: build arm64
         env:
           GOOS: darwin
           GOARCH: arm64
-        run: make build && mv dlv delve_darwin_arm64
+        run: go run _scripts/make.go build --GOARCH arm64 --GOOS darwin && mv dlv delve_darwin_arm64
       - name: Sign delve binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
