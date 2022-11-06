@@ -547,6 +547,14 @@ func LLDBLaunch(cmd []string, wd string, flags proc.LaunchFlags, debugInfoDirs [
 
 	if runtime.GOOS == "darwin" {
 		process.Env = proc.DisableAsyncPreemptEnv()
+		// filter out DYLD_* environment variables
+		env := make([]string, 0, len(process.Env))
+		for _, v := range process.Env {
+			if !strings.HasPrefix(v, "DYLD_") {
+				env = append(env, v)
+			}
+		}
+		process.Env = env
 	}
 
 	if err = process.Start(); err != nil {
