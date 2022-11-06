@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/go-delve/delve/pkg/goversion"
@@ -251,34 +250,8 @@ func installedExecutablePath() string {
 // i.e. cgo enabled and the legacy SDK headers:
 // https://forums.developer.apple.com/thread/104296
 func canMacnative() bool {
-	if !(runtime.GOOS == "darwin" && runtime.GOARCH == "amd64") {
-		return false
-	}
-	if strings.TrimSpace(getoutput("go", "env", "CGO_ENABLED")) != "1" {
-		return false
-	}
-
-	macOSVersion := strings.Split(strings.TrimSpace(getoutput("/usr/bin/sw_vers", "-productVersion")), ".")
-
-	major, err := strconv.ParseInt(macOSVersion[0], 10, 64)
-	if err != nil {
-		return false
-	}
-	minor, err := strconv.ParseInt(macOSVersion[1], 10, 64)
-	if err != nil {
-		return false
-	}
-
-	typesHeader := "/usr/include/sys/types.h"
-	if major >= 11 || (major == 10 && minor >= 15) {
-		sdkpath := strings.TrimSpace(getoutput("xcrun", "--sdk", "macosx", "--show-sdk-path"))
-		typesHeader = filepath.Join(sdkpath, "usr", "include", "sys", "types.h")
-	}
-	_, err = os.Stat(typesHeader)
-	if err != nil {
-		return false
-	}
-	return true
+	// never macnative..
+	return false
 }
 
 // prepareMacnative checks if we can build the native backend for macOS and
