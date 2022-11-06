@@ -1,0 +1,45 @@
+name: release
+
+on:
+  push:
+    # run only against tags
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - run: git fetch --force --tags
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '>=1.19.3'
+          cache: true
+      - name: build x64
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+        run: make build && mv dlv delve_darwin_amd64
+      - name: build arm64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: make build && mv dlv delve_darwin_arm64
+      - name: Sign delve binaries
+        env:
+          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
+          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
+        run: gon -log-level=debug -log-json .github/workflows/sign.json
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            delve_darwin_amd64
+            delve_darwin_arm64
