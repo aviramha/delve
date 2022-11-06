@@ -26,11 +26,11 @@ jobs:
         run: go run _scripts/make.go build --GOARCH amd64 --GOOS darwin && mv dlv delve_darwin_amd64
       - name: build arm64
         run: go run _scripts/make.go build --GOARCH arm64 --GOOS darwin && mv dlv delve_darwin_arm64
-      - name: Sign delve binaries
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/sign.json
+      # adhoc sign, as distributed dlv binaries are adhoc signed anyway..
+      - name: sign x64
+        run: codesign -s - delve_darwin_amd64
+      - name: sign arm64
+        run: codesign -s - delve_darwin_arm64
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
