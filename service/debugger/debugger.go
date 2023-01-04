@@ -772,13 +772,15 @@ func (d *Debugger) ConvertThreadBreakpoint(thread proc.Thread) *api.Breakpoint {
 func createLogicalBreakpoint(d *Debugger, requestedBp *api.Breakpoint, setbp *proc.SetBreakpoint, suspended bool) (*api.Breakpoint, error) {
 	id := requestedBp.ID
 
-	var lbp *proc.LogicalBreakpoint
 	if id <= 0 {
 		d.breakpointIDCounter++
 		id = d.breakpointIDCounter
-		lbp = &proc.LogicalBreakpoint{LogicalID: id, HitCount: make(map[int64]uint64), Enabled: true}
-		d.target.LogicalBreakpoints[id] = lbp
+	} else {
+		d.breakpointIDCounter = id
 	}
+
+	lbp := &proc.LogicalBreakpoint{LogicalID: id, HitCount: make(map[int64]uint64), Enabled: true}
+	d.target.LogicalBreakpoints[id] = lbp
 
 	err := copyLogicalBreakpointInfo(lbp, requestedBp)
 	if err != nil {
@@ -1559,8 +1561,8 @@ func (d *Debugger) Function(goid int64, frame, deferredCall int, cfg proc.LoadCo
 	return s.Fn, nil
 }
 
-// EvalVariableInScope will attempt to evaluate the variable represented by 'symbol'
-// in the scope provided.
+// EvalVariableInScope will attempt to evaluate the 'expr' in the scope
+// corresponding to the given 'frame' on the goroutine identified by 'goid'.
 func (d *Debugger) EvalVariableInScope(goid int64, frame, deferredCall int, expr string, cfg proc.LoadConfig) (*proc.Variable, error) {
 	d.targetMutex.Lock()
 	defer d.targetMutex.Unlock()

@@ -547,10 +547,13 @@ func LLDBLaunch(cmd []string, wd string, flags proc.LaunchFlags, debugInfoDirs [
 
 	if runtime.GOOS == "darwin" {
 		process.Env = proc.DisableAsyncPreemptEnv()
-		// filter out DYLD_* environment variables
+		// Filter out DYLD_INSERT_LIBRARIES on Darwin.
+		// This is needed since macOS Ventura, loading custom dylib into debugserver
+		// using DYLD_INSERT_LIBRARIES leads to a crash.
+		// This is unlike other protected processes, where they just strip it out.
 		env := make([]string, 0, len(process.Env))
 		for _, v := range process.Env {
-			if !strings.HasPrefix(v, "DYLD_") {
+			if !strings.HasPrefix(v, "DYLD_INSERT_LIBRARIES") {
 				env = append(env, v)
 			}
 		}
@@ -569,6 +572,13 @@ func LLDBLaunch(cmd []string, wd string, flags proc.LaunchFlags, debugInfoDirs [
 		tgt, err = p.Listen(listener, cmd[0], 0, debugInfoDirs, proc.StopLaunched)
 	} else {
 		tgt, err = p.Dial(port, cmd[0], 0, debugInfoDirs, proc.StopLaunched)
+	}
+	if p.conn.pid != 0 && foreground && isatty.IsTerminal(os.Stdin.Fd()) {
+		// Make the target process the controlling process of the tty if it is a foreground process.
+		err := tcsetpgrp(os.Stdin.Fd(), p.conn.pid)
+		if err != nil {
+			logflags.DebuggerLogger().Errorf("could not set controlling process: %v", err)
+		}
 	}
 	return tgt, err
 }
@@ -1005,7 +1015,7 @@ func (p *gdbProcess) handleThreadSignals(cctx *proc.ContinueOnceContext, trapthr
 
 	if p.getCtrlC(cctx) || cctx.GetManualStopRequested() {
 		// If we request an interrupt and a target thread simultaneously receives
-		// an unrelated singal debugserver will discard our interrupt request and
+		// an unrelated signal debugserver will discard our interrupt request and
 		// report the signal but we should stop anyway.
 		shouldStop = true
 	}
@@ -1881,7 +1891,7 @@ func (t *gdbThread) clearBreakpointState() {
 
 // SetCurrentBreakpoint will find and set the threads current breakpoint.
 func (t *gdbThread) SetCurrentBreakpoint(adjustPC bool) error {
-	// adjustPC is ignored, it is the stub's responsibiility to set the PC
+	// adjustPC is ignored, it is the stub's responsibility to set the PC
 	// address correctly after hitting a breakpoint.
 	t.CurrentBreakpoint.Clear()
 	if t.watchAddr > 0 {
@@ -1957,7 +1967,7 @@ func (r *gdbRegisters) FloatLoadError() error {
 
 // SetPC will set the value of the PC register to the given value.
 func (t *gdbThread) setPC(pc uint64) error {
-	_, _ = t.Registers() // Registes must be loaded first
+	_, _ = t.Registers() // Registers must be loaded first
 	t.regs.setPC(pc)
 	if t.p.gcmdok {
 		return t.p.conn.writeRegisters(t.strID, t.regs.buf)

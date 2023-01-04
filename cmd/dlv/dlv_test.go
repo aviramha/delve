@@ -210,7 +210,11 @@ func getDlvBin(t *testing.T) (string, string) {
 	// we can ensure we don't get build errors
 	// depending on the test ordering.
 	os.Setenv("CGO_LDFLAGS", ldFlags)
-	return getDlvBinInternal(t)
+	var tags string
+	if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
+		tags = "-tags=exp.winarm64"
+	}
+	return getDlvBinInternal(t, tags)
 }
 
 func getDlvBinEBPF(t *testing.T) (string, string) {
@@ -424,6 +428,10 @@ func TestGeneratedDoc(t *testing.T) {
 	if strings.ToLower(os.Getenv("TRAVIS")) == "true" && runtime.GOOS == "windows" {
 		t.Skip("skipping test on Windows in CI")
 	}
+	if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
+		//TODO(qmuntal): investigate further when the Windows ARM64 backend is more stable.
+		t.Skip("skipping test on Windows in CI")
+	}
 	// Checks gen-cli-docs.go
 	var generatedBuf bytes.Buffer
 	commands := terminal.DebugCommands(nil)
@@ -457,9 +465,10 @@ func TestGeneratedDoc(t *testing.T) {
 		return out
 	}
 
+	checkAutogenDoc(t, "Documentation/backend_test_health.md", "go run _scripts/gen-backend_test_health.go", runScript("_scripts/gen-backend_test_health.go", "-"))
 	checkAutogenDoc(t, "pkg/terminal/starbind/starlark_mapping.go", "'go generate' inside pkg/terminal/starbind", runScript("_scripts/gen-starlark-bindings.go", "go", "-"))
 	checkAutogenDoc(t, "Documentation/cli/starlark.md", "'go generate' inside pkg/terminal/starbind", runScript("_scripts/gen-starlark-bindings.go", "doc/dummy", "Documentation/cli/starlark.md"))
-	checkAutogenDoc(t, "Documentation/backend_test_health.md", "go run _scripts/gen-backend_test_health.go", runScript("_scripts/gen-backend_test_health.go", "-"))
+	checkAutogenDoc(t, "Documentation/faq.md", "'go run _scripts/gen-faq-toc.go Documentation/faq.md Documentation/faq.md'", runScript("_scripts/gen-faq-toc.go", "Documentation/faq.md", "-"))
 	if goversion.VersionAfterOrEqual(runtime.Version(), 1, 18) {
 		checkAutogenDoc(t, "_scripts/rtype-out.txt", "go run _scripts/rtype.go report _scripts/rtype-out.txt", runScript("_scripts/rtype.go", "report"))
 		runScript("_scripts/rtype.go", "check")
@@ -701,8 +710,15 @@ func TestDAPCmd(t *testing.T) {
 	client.DisconnectRequest()
 	client.ExpectDisconnectResponse(t)
 	client.ExpectTerminatedEvent(t)
-	if _, err := client.ReadMessage(); err != io.EOF {
-		t.Errorf("got %q, want \"EOF\"\n", err)
+	_, err = client.ReadMessage()
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Errorf("got %q, want non-nil\n", err)
+		}
+	} else {
+		if err != io.EOF {
+			t.Errorf("got %q, want \"EOF\"\n", err)
+		}
 	}
 	client.Close()
 	cmd.Wait()
@@ -1021,11 +1037,6 @@ func TestTrace(t *testing.T) {
 }
 
 func TestTraceMultipleGoroutines(t *testing.T) {
-	if runtime.GOOS == "freebsd" {
-		//TODO(aarzilli): investigate further when the FreeBSD backend is more stable.
-		t.Skip("temporarily disabled due to issues with FreeBSD in Delve and Go")
-	}
-
 	dlvbin, tmpdir := getDlvBin(t)
 	defer os.RemoveAll(tmpdir)
 
@@ -1255,19 +1266,32 @@ func TestDlvTestChdir(t *testing.T) {
 	defer os.RemoveAll(tmpdir)
 
 	fixtures := protest.FindFixturesDir()
-	cmd := exec.Command(dlvbin, "--allow-non-terminal-interactive=true", "test", filepath.Join(fixtures, "buildtest"), "--", "-test.v")
-	cmd.Stdin = strings.NewReader("continue\nexit\n")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("error executing Delve: %v", err)
-	}
-	t.Logf("output: %q", out)
 
-	p, _ := filepath.Abs(filepath.Join(fixtures, "buildtest"))
-	tgt := "current directory: " + p
-	if !strings.Contains(string(out), tgt) {
-		t.Errorf("output did not contain expected string %q", tgt)
+	dotest := func(testargs []string) {
+		t.Helper()
+
+		args := []string{"--allow-non-terminal-interactive=true", "test"}
+		args = append(args, testargs...)
+		args = append(args, "--", "-test.v")
+		t.Logf("dlv test %s", args)
+		cmd := exec.Command(dlvbin, args...)
+		cmd.Stdin = strings.NewReader("continue\nexit\n")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("error executing Delve: %v", err)
+		}
+		t.Logf("output: %q", out)
+
+		p, _ := filepath.Abs(filepath.Join(fixtures, "buildtest"))
+		tgt := "current directory: " + p
+		if !strings.Contains(string(out), tgt) {
+			t.Errorf("output did not contain expected string %q", tgt)
+		}
 	}
+
+	dotest([]string{filepath.Join(fixtures, "buildtest")})
+	files, _ := filepath.Glob(filepath.Join(fixtures, "buildtest", "*.go"))
+	dotest(files)
 }
 
 func TestVersion(t *testing.T) {
@@ -1289,6 +1313,10 @@ func TestStaticcheck(t *testing.T) {
 	_, err := exec.LookPath("staticcheck")
 	if err != nil {
 		t.Skip("staticcheck not installed")
+	}
+	if goversion.VersionAfterOrEqual(runtime.Version(), 1, 20) {
+		//TODO(aarzilli): remove this when there is a version of staticcheck that can support go1.20
+		t.Skip("staticcheck does not support go1.20 currently")
 	}
 	// default checks minus SA1019 which complains about deprecated identifiers, which change between versions of Go.
 	args := []string{"-tests=false", "-checks=all,-SA1019,-ST1000,-ST1003,-ST1016,-S1021,-ST1023", "github.com/go-delve/delve/..."}

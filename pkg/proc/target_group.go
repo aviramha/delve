@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// TargetGroup reperesents a group of target processes being debugged that
+// TargetGroup represents a group of target processes being debugged that
 // will be resumed and stopped simultaneously.
 // New targets are automatically added to the group if exec catching is
 // enabled and the backend supports it, otherwise the group will always
@@ -211,14 +211,14 @@ func enableBreakpointOnTarget(p *Target, lbp *LogicalBreakpoint) error {
 		addrs, err = FindFileLocation(p, lbp.Set.File, lbp.Set.Line)
 	case lbp.Set.FunctionName != "":
 		addrs, err = FindFunctionLocation(p, lbp.Set.FunctionName, lbp.Set.Line)
-	case lbp.Set.Expr != nil:
-		addrs = lbp.Set.Expr(p)
 	case len(lbp.Set.PidAddrs) > 0:
 		for _, pidAddr := range lbp.Set.PidAddrs {
 			if pidAddr.Pid == p.Pid() {
 				addrs = append(addrs, pidAddr.Addr)
 			}
 		}
+	case lbp.Set.Expr != nil:
+		addrs = lbp.Set.Expr(p)
 	default:
 		return fmt.Errorf("breakpoint %d can not be enabled", lbp.LogicalID)
 	}

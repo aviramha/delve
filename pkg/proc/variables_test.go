@@ -820,6 +820,15 @@ func TestEvalExpression(t *testing.T) {
 		{`(*string)(&typedstringvar)`, false, `(*string)(…`, `(*string)(…`, "*string", nil},
 		{`(*main.astruct)(&namedA1)`, false, `(*main.astruct)(…`, `(*main.astruct)(…`, "*main.astruct", nil},
 		{`(*main.astructName2)(&namedA1)`, false, `(*main.astructName2)(…`, `(*main.astructName2)(…`, "*main.astructName2", nil},
+
+		// Conversions to and from uintptr/unsafe.Pointer
+		{`*(*uint)(uintptr(p1))`, false, `1`, `1`, "uint", nil},
+		{`*(*uint)(uintptr(&i1))`, false, `1`, `1`, "uint", nil},
+		{`*(*uint)(unsafe.Pointer(p1))`, false, `1`, `1`, "uint", nil},
+		{`*(*uint)(unsafe.Pointer(&i1))`, false, `1`, `1`, "uint", nil},
+
+		// Conversions to ptr-to-ptr types
+		{`**(**runtime.hmap)(uintptr(&m1))`, false, `…`, `…`, "runtime.hmap", nil},
 	}
 
 	ver, _ := goversion.Parse(runtime.Version())
@@ -1206,6 +1215,10 @@ func TestCallFunction(t *testing.T) {
 		// Issue 1577
 		{"1+2", []string{`::3`}, nil},
 		{`"de"+"mo"`, []string{`::"demo"`}, nil},
+
+		// Issue 3176
+		{`ref.String()[0]`, []string{`:byte:98`}, nil},
+		{`ref.String()[20]`, nil, errors.New("index out of bounds")},
 	}
 
 	var testcases112 = []testCaseCallFunction{
@@ -1563,14 +1576,14 @@ func TestEvalExpressionGenerics(t *testing.T) {
 
 	testcases := [][]varTest{
 		// testfn[int, float32]
-		[]varTest{
+		{
 			{"arg1", true, "3", "", "int", nil},
 			{"arg2", true, "2.1", "", "float32", nil},
 			{"m", true, "map[float32]int [2.1: 3, ]", "", "map[float32]int", nil},
 		},
 
 		// testfn[*astruct, astruct]
-		[]varTest{
+		{
 			{"arg1", true, "*main.astruct {x: 0, y: 1}", "", "*main.astruct", nil},
 			{"arg2", true, "main.astruct {x: 2, y: 3}", "", "main.astruct", nil},
 			{"m", true, "map[main.astruct]*main.astruct [{x: 2, y: 3}: *{x: 0, y: 1}, ]", "", "map[main.astruct]*main.astruct", nil},
@@ -1594,6 +1607,69 @@ func TestEvalExpressionGenerics(t *testing.T) {
 					}
 				}
 			}
+		}
+	})
+}
+
+// Test the behavior when reading dangling pointers produced by unsafe code.
+func TestBadUnsafePtr(t *testing.T) {
+	withTestProcess("testunsafepointers", t, func(p *proc.Target, fixture protest.Fixture) {
+		assertNoError(p.Continue(), t, "Continue()")
+
+		// danglingPtrPtr is a pointer with value 0x42, which is an unreadable
+		// address.
+		danglingPtrPtr, err := evalVariableWithCfg(p, "danglingPtrPtr", pnormalLoadConfig)
+		assertNoError(err, t, "eval returned an error")
+		t.Logf("danglingPtrPtr (%s): unreadable: %v. addr: 0x%x, value: %v",
+			danglingPtrPtr.TypeString(), danglingPtrPtr.Unreadable, danglingPtrPtr.Addr, danglingPtrPtr.Value)
+		assertNoError(danglingPtrPtr.Unreadable, t, "danglingPtrPtr is unreadable")
+		if val := danglingPtrPtr.Value; val == nil {
+			t.Fatal("Value not set danglingPtrPtr")
+		}
+		val, ok := constant.Uint64Val(danglingPtrPtr.Value)
+		if !ok {
+			t.Fatalf("Value not uint64: %v", danglingPtrPtr.Value)
+		}
+		if val != 0x42 {
+			t.Fatalf("expected value to be 0x42, got 0x%x", val)
+		}
+		if len(danglingPtrPtr.Children) != 1 {
+			t.Fatalf("expected 1 child, got: %d", len(danglingPtrPtr.Children))
+		}
+
+		badPtr, err := evalVariableWithCfg(p, "*danglingPtrPtr", pnormalLoadConfig)
+		assertNoError(err, t, "error evaluating *danglingPtrPtr")
+		t.Logf("badPtr: (%s): unreadable: %v. addr: 0x%x, value: %v",
+			badPtr.TypeString(), badPtr.Unreadable, badPtr.Addr, badPtr.Value)
+		if badPtr.Unreadable == nil {
+			t.Fatalf("badPtr should be unreadable")
+		}
+		if badPtr.Addr != 0x42 {
+			t.Fatalf("expected danglingPtr to point to 0x42, got 0x%x", badPtr.Addr)
+		}
+		if len(badPtr.Children) != 1 {
+			t.Fatalf("expected 1 child, got: %d", len(badPtr.Children))
+		}
+		badPtrChild := badPtr.Children[0]
+		t.Logf("badPtr.Child (%s): unreadable: %v. addr: 0x%x, value: %v",
+			badPtrChild.TypeString(), badPtrChild.Unreadable, badPtrChild.Addr, badPtrChild.Value)
+		// We expect the dummy child variable to be marked as unreadable.
+		if badPtrChild.Unreadable == nil {
+			t.Fatalf("expected x to be unreadable, but got value: %v", badPtrChild.Value)
+		}
+
+		// Evaluating **danglingPtrPtr fails.
+		_, err = evalVariableWithCfg(p, "**danglingPtrPtr", pnormalLoadConfig)
+		if err == nil {
+			t.Fatalf("expected error doing **danglingPtrPtr")
+		}
+		expErr := "couldn't read pointer"
+		if !strings.Contains(err.Error(), expErr) {
+			t.Fatalf("expected \"%s\", got: \"%s\"", expErr, err)
+		}
+		nexpErr := "nil pointer dereference"
+		if strings.Contains(err.Error(), nexpErr) {
+			t.Fatalf("shouldn't have gotten \"%s\", but got: \"%s\"", nexpErr, err)
 		}
 	})
 }

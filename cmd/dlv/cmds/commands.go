@@ -278,7 +278,7 @@ unit tests. By default Delve will debug the tests in the current directory.
 Alternatively you can specify a package name, and Delve will debug the tests in
 that package instead. Double-dashes ` + "`--`" + ` can be used to pass arguments to the test program:
 
-dlv test [package] -- -test.v -other-argument
+dlv test [package] -- -test.run TestSometing -test.v -other-argument
 
 See also: 'go help testflag'.`,
 		Run: testCmd,
@@ -327,6 +327,10 @@ Currently supports linux/amd64 and linux/arm64 core files, windows/amd64 minidum
 		},
 		Run: coreCmd,
 	}
+	// -c is unused and exists so delve can be used with coredumpctl
+	core := false
+	coreCommand.Flags().BoolVarP(&core, "core", "c", false, "")
+	coreCommand.Flags().MarkHidden("core")
 	rootCommand.AddCommand(coreCommand)
 
 	// 'version' subcommand.
@@ -750,11 +754,7 @@ func testCmd(cmd *cobra.Command, args []string) {
 		processArgs := append([]string{debugname}, targetArgs...)
 
 		if workingDir == "" {
-			if len(dlvArgs) == 1 {
-				workingDir = getPackageDir(dlvArgs[0])
-			} else {
-				workingDir = "."
-			}
+			workingDir = getPackageDir(dlvArgs)
 		}
 
 		return execute(0, processArgs, conf, "", debugger.ExecutingGeneratedTest, dlvArgs, buildFlags)
@@ -762,8 +762,10 @@ func testCmd(cmd *cobra.Command, args []string) {
 	os.Exit(status)
 }
 
-func getPackageDir(pkg string) string {
-	out, err := exec.Command("go", "list", "--json", pkg).CombinedOutput()
+func getPackageDir(pkg []string) string {
+	args := []string{"list", "--json"}
+	args = append(args, pkg...)
+	out, err := exec.Command("go", args...).CombinedOutput()
 	if err != nil {
 		return "."
 	}
